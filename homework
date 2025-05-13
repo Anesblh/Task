@@ -1,0 +1,173 @@
+#include "stm32f7xx.h"
+
+#define LEDG_PIN 0   // PB0
+#define LEDB_PIN 7   // PB7
+#define LEDR_PIN 14  // PB14
+#define BTN_PIN 13   // PC13
+
+volatile uint32_t msTicks = 0;
+volatile uint8_t ledIndex = 0;
+volatile uint8_t autoMode = 0;
+volatile uint8_t buttonState = 0;        // 0 = released, 1 = pressed
+volatile uint32_t btnPressStart = 0;
+
+// === SysTick Handler ===
+void SysTick_Handler(void) {
+    msTicks++;
+}
+
+// === Delay Function ===
+void delay_ms(uint32_t ms) {
+    uint32_t start = msTicks;
+    while ((msTicks - start) < ms);
+}
+
+// === GPIO Init ===
+void GPIO_Init(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOCEN;
+
+    // Set PB0, PB7, PB14 as output (LEDs)
+    GPIOB->MODER |= (1 << (2 * LEDG_PIN)) | (1 << (2 * LEDB_PIN)) | (1 << (2 * LEDR_PIN));
+
+    // PC13 is input (default)
+}
+
+// === Timer2: LED Blink Timer ===
+void TIM2_Init(uint32_t ms) {
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+    TIM2->PSC = 21600 - 1;   // 10kHz
+    TIM2->ARR = ms * 10;     // ms
+    TIM2->DIER |= TIM_DIER_UIE;
+    TIM2->CR1 |= TIM_CR1_CEN;
+    NVIC_EnableIRQ(TIM2_IRQn);
+}
+
+// === Timer3: Debounce Timer ===
+void TIM3_Init(void) {
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+    TIM3->PSC = 21600 - 1;
+    TIM3->ARR = 100;         // 10ms
+    TIM3->DIER |= TIM_DIER_UIE;
+    NVIC_EnableIRQ(TIM3_IRQn);
+}
+
+// === EXTI for Button ===
+void EXTI_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+    SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI13_PC;
+    EXTI->IMR |= EXTI_IMR_IM13;
+    EXTI->FTSR |= EXTI_FTSR_TR13;
+    NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+// === TIM2: LED Blinker & Mode ===
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_UIF) {
+        TIM2->SR &= ~TIM_SR_UIF;
+
+        // Turn ON current LED, OFF others
+        switch (ledIndex) {
+            case 0:
+                GPIOB->ODR ^= (1 << LEDG_PIN);
+                GPIOB->ODR &= ~((1 << LEDB_PIN) | (1 << LEDR_PIN));
+                break;
+            case 1:
+                GPIOB->ODR ^= (1 << LEDB_PIN);
+                GPIOB->ODR &= ~((1 << LEDG_PIN) | (1 << LEDR_PIN));
+                break;
+            case 2:
+                GPIOB->ODR ^= (1 << LEDR_PIN);
+                GPIOB->ODR &= ~((1 << LEDG_PIN) | (1 << LEDB_PIN));
+                break;
+        }
+
+        // Auto-mode: go to next LED
+        if (autoMode) {
+            ledIndex = (ledIndex + 1) % 3;
+        }
+    }
+}
+
+// === TIM3: Debounce Timer ===
+void TIM3_IRQHandler(void) {
+    if (TIM3->SR & TIM_SR_UIF) {
+        TIM3->SR &= ~TIM_SR_UIF;
+        TIM3->CR1 &= ~TIM_CR1_CEN;
+
+        // Confirm button is still pressed (active low)
+        if (!(GPIOC->IDR & (1 << BTN_PIN))) {
+            if (!buttonState) {
+                buttonState = 1; // mark as pressed
+                btnPressStart = msTicks;
+            }
+        }
+    }
+}
+
+// === EXTI: Button Press Detected ===
+void EXTI15_10_IRQHandler(void) {
+    if (EXTI->PR & EXTI_PR_PR13) {
+        EXTI->PR = EXTI_PR_PR13;
+
+        // Start debounce timer
+        TIM3->CNT = 0;
+        TIM3->CR1 |= TIM_CR1_CEN;
+    }
+}
+
+// === Clock Init: 216 MHz ===
+void clock_init(void) {
+    RCC->CR |= RCC_CR_HSEON;
+    while (!(RCC->CR & RCC_CR_HSERDY));
+    FLASH->ACR |= FLASH_ACR_LATENCY_7WS;
+
+    RCC->PLLCFGR = (25 << RCC_PLLCFGR_PLLM_Pos) |
+                   (432 << RCC_PLLCFGR_PLLN_Pos) |
+                   (0 << RCC_PLLCFGR_PLLP_Pos) |
+                   RCC_PLLCFGR_PLLSRC_HSE |
+                   (9 << RCC_PLLCFGR_PLLQ_Pos);
+
+    RCC->CR |= RCC_CR_PLLON;
+    while (!(RCC->CR & RCC_CR_PLLRDY));
+
+    RCC->CFGR |= RCC_CFGR_HPRE_DIV1;
+    RCC->CFGR |= RCC_CFGR_PPRE1_DIV4 | RCC_CFGR_PPRE2_DIV2;
+    RCC->CFGR |= RCC_CFGR_SW_PLL;
+    while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL);
+
+    SystemCoreClockUpdate();
+}
+
+// === Main Program ===
+int main(void) {
+    clock_init();
+    SystemCoreClockUpdate();
+    SysTick_Config(SystemCoreClock / 1000); // 1 ms tick
+
+    GPIO_Init();
+    TIM2_Init(500);  // Blink every 500ms
+    TIM3_Init();     // 10 ms debounce
+    EXTI_Init();     // Button interrupt
+
+    while (1) {
+        // Check for button release
+        if (buttonState && (GPIOC->IDR & (1 << BTN_PIN))) {
+            uint32_t pressDuration = msTicks - btnPressStart;
+
+            if (pressDuration >= 2000) {
+                autoMode = 1;  // Long press: auto mode
+            } else {
+                if (!autoMode) {
+                    ledIndex = (ledIndex + 1) % 3;  // Short press: manual cycle
+                }
+            }
+
+            buttonState = 0;  // reset
+        }
+
+        // If autoMode active but button is now released: exit auto mode
+        if (autoMode && (GPIOC->IDR & (1 << BTN_PIN))) {
+            autoMode = 0;
+        }
+    }
+}
