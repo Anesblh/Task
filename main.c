@@ -23,7 +23,7 @@ void SysTick_Handler(void) {
     msTicks++;
 }
 
-// GPIO Init - CORRECTED FOR STM32F767xx
+// GPIO Init 
 void GPIO_Init(void) {
     // Enable clocks for GPIOA, GPIOB, and GPIOC
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOCEN;
@@ -32,7 +32,7 @@ void GPIO_Init(void) {
     GPIOB->MODER &= ~(GPIO_MODER_MODER0 | GPIO_MODER_MODER7 | GPIO_MODER_MODER14);
     GPIOB->MODER |= (1 << (2 * LEDG_PIN)) | (1 << (2 * LEDB_PIN)) | (1 << (2 * LEDR_PIN));
 
-    // Configure PA0 (CLK) and PA1 (DT) as inputs with pull-up - YOUR ACTUAL CONNECTIONS
+    // Configure PA0 (CLK) and PA1 (DT) as inputs with pull-up 
     GPIOA->MODER &= ~(GPIO_MODER_MODER0 | GPIO_MODER_MODER1);
     GPIOA->PUPDR |= (GPIO_PUPDR_PUPDR0_0 | GPIO_PUPDR_PUPDR1_0);
     GPIOA->OSPEEDR |= (GPIO_OSPEEDER_OSPEEDR0 | GPIO_OSPEEDER_OSPEEDR1);
@@ -57,7 +57,7 @@ void TIM3_Init(void) {
     NVIC_EnableIRQ(TIM3_IRQn);
 }
 
-// EXTI Configuration - CORRECTED FOR PA0
+// EXTI Configuration 
 void EXTI_Init(void) {
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
 
@@ -67,7 +67,7 @@ void EXTI_Init(void) {
     EXTI->RTSR |= EXTI_RTSR_TR13;
     NVIC_EnableIRQ(EXTI15_10_IRQn);
 
-    // Configure EXTI0 for encoder CLK (PA0) - YOUR ACTUAL CONNECTION
+    // Configure EXTI0 for encoder CLK (PA0)
     SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI0;
     SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA;
     EXTI->IMR |= EXTI_IMR_MR0;
@@ -212,3 +212,4 @@ int main(void) {
         }
     }
 }
+
